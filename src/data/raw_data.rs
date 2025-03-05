@@ -1,11 +1,8 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey, SigningKey, Signer};
-use sha2::{Sha512, Digest};
+use sha2::{Sha256, Digest};
 use aes_gcm::{Aes256Gcm, Nonce, aead::Aead, Key, KeyInit};
 use rand::{rngs::OsRng, TryRngCore};
 use std::sync::Arc;
-
-#[derive(Debug)]
-struct Payload(Vec<u8>);
 
 
 #[derive(Debug)]
@@ -23,27 +20,7 @@ impl RawData {
 }
 
 // For getting the data from link
-impl From<Vec<u8>> for RawData {
-    fn from(value: Vec<u8>) -> Self {
-        let len = value.len();
-        assert!(len > 28, "Length of value should be greater than 28");
-        let mut nonce = [0; 12];
-        nonce.clone_from_slice(&value[..12]);
-        Self {
-            nonce,
-            content: value[12..len-16].to_vec(),
-        }
-    }
-}
-
 // For putting the data to link
-impl From<RawData> for Vec<u8> {
-    fn from(value: RawData) -> Self {
-        let mut serialized = Vec::from(value.nonce);
-        serialized.extend(value.content);
-        serialized
-    }
-}
 
 
 #[derive(Debug)]
@@ -61,12 +38,12 @@ enum Auth {
 impl SignedData {
     // drops self
     fn verify_signature(self) -> Auth {
-        let pub_key = VerifyingKey::from_bytes(&self.key).unwrap();
+        let vk = VerifyingKey::from_bytes(&self.key).unwrap();
         let signature = Signature::from_bytes(&self.signature);
-        let mut data_hash = Sha512::new();
+        let mut data_hash = Sha256::new();
         data_hash.update(&self.data);
         let hashed_value = data_hash.finalize();
-        if let Ok(()) = pub_key.verify(&hashed_value, &signature) {
+        if let Ok(()) = vk.verify(&hashed_value, &signature) {
             return Auth::Verified(self.data);
         }
         Auth::Unverified
@@ -92,7 +69,10 @@ impl Auth {
     fn sign(self, signing_key: SigningKey) -> SignedData {
         match self {
             Auth::Verified(data) => {
-                let signature = signing_key.sign(&data).to_bytes();
+                let mut hasher = Sha256::new();
+                hasher.update(&data);
+                let hashed_data = hasher.finalize();
+                let signature = signing_key.sign(&hashed_data).to_bytes();
                 let key: [u8; 32] = signing_key.verifying_key().to_bytes();
                 SignedData {
                     data,
@@ -100,29 +80,10 @@ impl Auth {
                     key
                 }
             }
-            Auth::Unverified => todo!()
+            Auth::Unverified => panic!()
         }
     }
 }
-
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    #[test]
-    fn test_encryption_decryption() {
-        let key = Key::<Aes256Gcm>::from_slice(b"asdasdasdasdasddasdasdasdasdasdd");
-        let plaintext: SignedData = b"Hello, world!xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_vec().into();
-        let cipher = Arc::new(Aes256Gcm::new(key));
-        let rd = plaintext.encrypt(cipher.clone());
-        let res = rd.decrypt(cipher);
-        assert_eq!(res.data, b"Hello, world!");
-    }
-
-
-}
-
-
 
 impl From<SignedData> for Vec<u8> {
     fn from(value: SignedData) -> Self {
@@ -133,6 +94,7 @@ impl From<SignedData> for Vec<u8> {
         bytes
     }
 }
+
 impl From<Vec<u8>> for SignedData{
     fn from(value: Vec<u8>) -> Self {
         assert!(value.len()>=96);
@@ -148,6 +110,50 @@ impl From<Vec<u8>> for SignedData{
             signature
         }
     }
-    // fn to_bytes(&self) -> Vec<u8> {
-    // }
+}
+
+impl From<Vec<u8>> for RawData {
+    fn from(value: Vec<u8>) -> Self {
+        let len = value.len();
+        assert!(len > 28, "Length of value should be greater than 28");
+        let mut nonce = [0; 12];
+        nonce.clone_from_slice(&value[..12]);
+        Self {
+            nonce,
+            content: value[12..len-16].to_vec(),
+        }
+    }
+}
+
+impl From<RawData> for Vec<u8> {
+    fn from(value: RawData) -> Self {
+        let mut serialized = Vec::from(value.nonce);
+        serialized.extend(value.content);
+        serialized
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_encryption_decryption() {
+        let key = Key::<Aes256Gcm>::from_slice(b"asdasdasdasdasddasdasdasdasdasdd");
+        let plaintext: SignedData = b"Hello, world!xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_vec().into();
+        let cipher = Arc::new(Aes256Gcm::new(key));
+        let rd = plaintext.encrypt(cipher.clone());
+        let res = rd.decrypt(cipher);
+        assert_eq!(res.data, b"Hello, world!");
+    }
+
+    #[test]
+    fn test_auth_to_raw_integration() {
+        let key = Key::<Aes256Gcm>::from_slice(b"asdasdasdasdasddasdasdasdasdasdd");
+        let auth_data = Auth::Verified(b"TEST TEST TEST DATA".to_vec());
+        let mut csprng = OsRng;
+        let signing_key: SigningKey = SigningKey::generate(&mut csprng);
+
+
+    }
+
 }
