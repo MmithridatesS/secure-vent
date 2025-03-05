@@ -1,6 +1,6 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey, SigningKey, Signer};
 use sha2::{Sha512, Digest};
-use aes_gcm::{Aes256Gcm, Nonce, aead::Aead};
+use aes_gcm::{Aes256Gcm, Nonce, aead::Aead, Key, KeyInit};
 use rand::{rngs::OsRng, TryRngCore};
 use std::sync::Arc;
 
@@ -112,9 +112,9 @@ mod test {
     #[test]
     fn test_encryption_decryption() {
         let key = Key::<Aes256Gcm>::from_slice(b"asdasdasdasdasddasdasdasdasdasdd");
-        let plaintext = b"Hello, world!";
+        let plaintext: SignedData = b"Hello, world!xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_vec().into();
         let cipher = Arc::new(Aes256Gcm::new(key));
-        let rd = SignedData::encrypt(plaintext.to_vec(), cipher.clone()).unwrap();
+        let rd = plaintext.encrypt(cipher.clone());
         let res = rd.decrypt(cipher);
         assert_eq!(res.data, b"Hello, world!");
     }
@@ -135,6 +135,7 @@ impl From<SignedData> for Vec<u8> {
 }
 impl From<Vec<u8>> for SignedData{
     fn from(value: Vec<u8>) -> Self {
+        assert!(value.len()>=96);
         let len = value.len();
         let mut key = [0u8; 32];
         let mut signature = [0u8; 64];
